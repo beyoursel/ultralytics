@@ -303,7 +303,7 @@ def get_cfg(cfg: Union[str, Path, Dict, SimpleNamespace] = DEFAULT_CFG_DICT, ove
         if "save_dir" not in cfg:
             overrides.pop("save_dir", None)  # special override keys to ignore
         check_dict_alignment(cfg, overrides)
-        cfg = {**cfg, **overrides}  # merge cfg and overrides dicts (prefer overrides)
+        cfg = {**cfg, **overrides}  # merge cfg and overrides dicts (prefer overrides) overrides的优先
 
     # Special handling for numeric project/name
     for k in "project", "name":
@@ -846,7 +846,7 @@ def entrypoint(debug: str = "") -> None:
         - For a list of all available commands and their arguments, see the provided help messages and the
           Ultralytics documentation at https://docs.ultralytics.com.
     """
-    args = (debug.split(" ") if debug else ARGV)[1:]
+    args = (debug.split(" ") if debug else ARGV)[1:] # ARGV为从sys.argv中读取的参数列表，即终端输入的脚本命令及后面的参数
     if not args:  # no arguments passed
         LOGGER.info(CLI_HELP_MSG)
         return
@@ -870,7 +870,7 @@ def entrypoint(debug: str = "") -> None:
     special.update({k[:-1]: v for k, v in special.items() if len(k) > 1 and k.endswith("s")})  # singular
     special = {**special, **{f"-{k}": v for k, v in special.items()}, **{f"--{k}": v for k, v in special.items()}}
 
-    overrides = {}  # basic overrides, i.e. imgsz=320
+    overrides = {}  # basic overrides, i.e. imgsz=320 overrides保存的为终端输入的参数，覆盖默认default.yaml中的参数
     for a in merge_equals_args(args):  # merge spaces around '=' sign
         if a.startswith("--"):
             LOGGER.warning(f"argument '{a}' does not require leading dashes '--', updating to '{a[2:]}'.")
@@ -890,9 +890,9 @@ def entrypoint(debug: str = "") -> None:
                 check_dict_alignment(full_args_dict, {a: ""}, e)
 
         elif a in TASKS:
-            overrides["task"] = a
+            overrides["task"] = a # detect
         elif a in MODES:
-            overrides["mode"] = a
+            overrides["mode"] = a # train val 
         elif a.lower() in special:
             special[a.lower()]()
             return
@@ -929,8 +929,7 @@ def entrypoint(debug: str = "") -> None:
             else:
                 raise ValueError(f"Invalid 'task={task}'. Valid tasks are {list(TASKS)}.\n{CLI_HELP_MSG}")
         if "model" not in overrides:
-            overrides["model"] = TASK2MODEL[task]
-
+            overrides["model"] = TASK2MODEL[task] # 若指定了task，则默认使用对应的yolo11模型
     # Model
     model = overrides.pop("model", DEFAULT_CFG.model)
     if model is None:
@@ -939,6 +938,7 @@ def entrypoint(debug: str = "") -> None:
     overrides["model"] = model
     stem = Path(model).stem.lower()
     if "rtdetr" in stem:  # guess architecture
+        # 模型路径中存在rtdetr，直接使用的RTDETR模型
         from ultralytics import RTDETR
 
         model = RTDETR(model)  # no task argument
@@ -952,9 +952,8 @@ def entrypoint(debug: str = "") -> None:
         model = SAM(model)
     else:
         from ultralytics import YOLO
-
-        model = YOLO(model, task=task)
-
+        # 下面verbose为打开，因此解析的模型未打印, 后续train过程也解析了一遍模型
+        model = YOLO(model, task=task) # 采用传入的model，若传入的不是yaml，不会创建新的模型，
     # Task Update
     if task != model.task:
         if task:
@@ -980,7 +979,8 @@ def entrypoint(debug: str = "") -> None:
             LOGGER.warning(f"'format' argument is missing. Using default 'format={overrides['format']}'.")
 
     # Run command in python
-    getattr(model, mode)(**overrides)  # default args from model
+    # 开始训练、推理、验证
+    getattr(model, mode)(**overrides)  # default args from model 调用YOLOmodel的basemodel中的train()
 
     # Show help
     LOGGER.info(f"💡 Learn more at https://docs.ultralytics.com/modes/{mode}")
@@ -1022,4 +1022,5 @@ def copy_default_cfg() -> None:
 
 if __name__ == "__main__":
     # Example: entrypoint(debug='yolo predict model=yolo11n.pt')
-    entrypoint(debug="")
+    entrypoint(debug="yolo detect train model=/media/taole/mydisk/DL_PROJECT/ultralytics/runs/detect/train8_trained_1e/weights/last.pt resume=True")
+    # entrypoint(debug="")

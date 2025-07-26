@@ -188,7 +188,7 @@ def get_default_callbacks():
         >>> print(list(callbacks.keys()))  # show all available callback events
         ['on_pretrain_routine_start', 'on_pretrain_routine_end', ...]
     """
-    return defaultdict(list, deepcopy(default_callbacks))
+    return defaultdict(list, deepcopy(default_callbacks)) # defaultdict的用法
 
 
 def add_integration_callbacks(instance):

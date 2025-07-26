@@ -146,9 +146,12 @@ class Model(torch.nn.Module):
         # Load or create new YOLO model
         __import__("os").environ["CUBLAS_WORKSPACE_CONFIG"] = ":4096:8"  # to avoid deterministic warnings
         if str(model).endswith((".yaml", ".yml")):
-            self._new(model, task=task, verbose=verbose)
+            print("========================create new model========================")
+            self._new(model, task=task, verbose=verbose) # 根据task、model cfg构建模型
         else:
-            self._load(model, task=task)
+            print(model)
+            print("===================load weight======================")
+            self._load(model, task=task) # 根据模型权重.pt加载模型，常用于推理阶段
 
         # Delete super().training for accessing self.model.training
         del self.training
@@ -255,9 +258,10 @@ class Model(torch.nn.Module):
             >>> model = Model()
             >>> model._new("yolo11n.yaml", task="detect", verbose=True)
         """
-        cfg_dict = yaml_model_load(cfg)
+        cfg_dict = yaml_model_load(cfg) # 根据模型yaml解析模型参数
         self.cfg = cfg
-        self.task = task or guess_model_task(cfg_dict)
+        self.task = task or guess_model_task(cfg_dict) # detect、segment ...
+        # (model or self._smart_load("model")) 返回一个模型类名，后面为输入的参数
         self.model = (model or self._smart_load("model"))(cfg_dict, verbose=verbose and RANK == -1)  # build model
         self.overrides["model"] = self.cfg
         self.overrides["task"] = self.task
@@ -292,7 +296,7 @@ class Model(torch.nn.Module):
         weights = checks.check_model_file_from_stem(weights)  # add suffix, i.e. yolo11n -> yolo11n.pt
 
         if str(weights).rpartition(".")[-1] == "pt":
-            self.model, self.ckpt = attempt_load_one_weight(weights)
+            self.model, self.ckpt = attempt_load_one_weight(weights) # torch model and ckpt cfg
             self.task = self.model.task
             self.overrides = self.model.args = self._reset_ckpt_args(self.model.args)
             self.ckpt_path = self.model.pt_path
@@ -769,6 +773,7 @@ class Model(torch.nn.Module):
             >>> model = YOLO("yolo11n.pt")
             >>> results = model.train(data="coco8.yaml", epochs=3)
         """
+        # kwargs为终端输入的参数
         self._check_is_pytorch_model()
         if hasattr(self.session, "model") and self.session.model.id:  # Ultralytics HUB session with loaded model
             if any(kwargs):
@@ -786,17 +791,16 @@ class Model(torch.nn.Module):
             "model": self.overrides["model"],
             "task": self.task,
         }  # method defaults
-        args = {**overrides, **custom, **kwargs, "mode": "train"}  # highest priority args on the right
+        args = {**overrides, **custom, **kwargs, "mode": "train"}  # highest priority args on the right 右边的会覆盖左边的key-value
         if args.get("resume"):
             args["resume"] = self.ckpt_path
-
-        self.trainer = (trainer or self._smart_load("trainer"))(overrides=args, _callbacks=self.callbacks)
+        self.trainer = (trainer or self._smart_load("trainer"))(overrides=args, _callbacks=self.callbacks) # 加载trainer
         if not args.get("resume"):  # manually set model only if not resuming
-            self.trainer.model = self.trainer.get_model(weights=self.model if self.ckpt else None, cfg=self.model.yaml)
+            self.trainer.model = self.trainer.get_model(weights=self.model if self.ckpt else None, cfg=self.model.yaml) # 这里才是真正创建模型，加载模型
             self.model = self.trainer.model
 
         self.trainer.hub_session = self.session  # attach optional HUB session
-        self.trainer.train()
+        self.trainer.train() # 开始训练
         # Update model and cfg after training
         if RANK in {-1, 0}:
             ckpt = self.trainer.best if self.trainer.best.exists() else self.trainer.last
@@ -1086,7 +1090,10 @@ class Model(torch.nn.Module):
             >>> trainer_class = model._smart_load("trainer")
         """
         try:
-            return self.task_map[self.task][key]
+            # Model没有实现task_map，直接调用子类的接口
+            # 下面self.task_map由于加了@property变成了属性方法，因此不用显示写成self.task_map()
+            print("=====================smart load")
+            return self.task_map[self.task][key] # 返回模型类名
         except Exception as e:
             name = self.__class__.__name__
             mode = inspect.stack()[1][3]  # get the function name.

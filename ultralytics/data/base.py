@@ -112,9 +112,9 @@ class BaseDataset(Dataset):
         self.fraction = fraction
         self.channels = channels
         self.cv2_flag = cv2.IMREAD_GRAYSCALE if channels == 1 else cv2.IMREAD_COLOR
-        self.im_files = self.get_img_files(self.img_path)
-        self.labels = self.get_labels()
-        self.update_labels(include_class=classes)  # single_cls and include_class
+        self.im_files = self.get_img_files(self.img_path) # 得到所有图片的绝对路径
+        self.labels = self.get_labels() # 获得所有的label，可使用cache
+        self.update_labels(include_class=classes)  # single_cls and include_class 仅包含设定的类别
         self.ni = len(self.labels)  # number of images
         self.rect = rect
         self.batch_size = batch_size
@@ -143,7 +143,7 @@ class BaseDataset(Dataset):
             self.cache_images()
 
         # Transforms
-        self.transforms = self.build_transforms(hyp=hyp)
+        self.transforms = self.build_transforms(hyp=hyp) # 加载数据预处理、数据增广等操作
 
     def get_img_files(self, img_path: Union[str, List[str]]) -> List[str]:
         """

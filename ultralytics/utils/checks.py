@@ -563,6 +563,7 @@ def check_file(file, suffix="", download=True, download_dir=".", hard=True):
             downloads.safe_download(url=url, file=file, unzip=False)
         return str(file)
     else:  # search
+        # 使用glob查找对应的模型或者数据的yaml
         files = glob.glob(str(ROOT / "**" / file), recursive=True) or glob.glob(str(ROOT.parent / file))  # find file
         if not files and hard:
             raise FileNotFoundError(f"'{file}' does not exist")
@@ -765,10 +766,14 @@ def check_amp(model):
 
     def amp_allclose(m, im):
         """All close FP32 vs AMP results."""
+        """
+        全精度 FP32 和 混合精度 AMP（Automatic Mixed Precision） 
+        下模型推理结果的一致性，用于验证模型在开启 AMP 的情况下是否还能保持合理精度。
+        """
         batch = [im] * 8
         imgsz = max(256, int(model.stride.max() * 4))  # max stride P5-32 and P6-64
         a = m(batch, imgsz=imgsz, device=device, verbose=False)[0].boxes.data  # FP32 inference
-        with autocast(enabled=True):
+        with autocast(enabled=True): # 混合精度前向传播
             b = m(batch, imgsz=imgsz, device=device, verbose=False)[0].boxes.data  # AMP inference
         del m
         return a.shape == b.shape and torch.allclose(a, b.float(), atol=0.5)  # close to 0.5 absolute tolerance

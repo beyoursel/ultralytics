@@ -52,3 +52,31 @@ ultralytics = "ultralytics.cfg:entrypoint"
 3. entrypoint函数的实现
 * 解析命令行参数
 * 根据参数调用对应的功能（如训练、推理、验证等）
+
+## 1.3 ultralytics配置
+### 1.3.1 default.yaml
+默认使用DEFAULT_CFG_PATH = ROOT / "cfg/default.yaml"下的配置文件。
+
+## 1.4 callback()是怎么触发的
+
+## 1.5 训练相关笔记
+### 1.5.1 RANK是什么
+在PyTorch分布式训练中：RANK表示当前进程的全局编号（进程rank）；通常，RANK == 0 是主进程，负责日志记录、保存模型、打印信息等；RANK == -1 一般用于非分布式模式，表示当前并未启用分布式训练（如单机单卡）；其他RANK > 0 是从进程。
+
+## 1.6 常用的pytorch方法
+### 1.6.1 遍历pytorch模型
+```
+def _model_train(self):
+    """Set model in training mode."""
+    self.model.train()
+    # Freeze BN stat
+    for n, m in self.model.named_modules():
+        if any(filter(lambda f: f in n, self.freeze_layer_names)) and isinstance(m, nn.BatchNorm2d):
+            m.eval()
+```
+
+## 1.7 ultralytics恢复上次训练
+```
+yolo detect train model=/media/taole/mydisk/DL_PROJECT/ultralytics/runs/detect/train8/weights/last.pt resume=True
+# 注意需要指定model=xxx.last.pt，和resume，在default.yaml中设置resume不生效
+```

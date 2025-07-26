@@ -99,7 +99,7 @@ class DetectionTrainer(BaseTrainer):
         Returns:
             (Dict): Preprocessed batch with normalized images.
         """
-        batch["img"] = batch["img"].to(self.device, non_blocking=True).float() / 255
+        batch["img"] = batch["img"].to(self.device, non_blocking=True).float() / 255 # normalized
         if self.args.multi_scale:
             imgs = batch["img"]
             sz = (
@@ -141,7 +141,7 @@ class DetectionTrainer(BaseTrainer):
         """
         model = DetectionModel(cfg, nc=self.data["nc"], ch=self.data["channels"], verbose=verbose and RANK == -1)
         if weights:
-            model.load(weights)
+            model.load(weights) # BaseModel load
         return model
 
     def get_validator(self):

@@ -135,8 +135,8 @@ class BaseModel(torch.nn.Module):
             (torch.Tensor): Loss if x is a dict (training), or network predictions (inference).
         """
         if isinstance(x, dict):  # for cases of training and validating while training.
-            return self.loss(x, *args, **kwargs)
-        return self.predict(x, *args, **kwargs)
+            return self.loss(x, *args, **kwargs) # for training
+        return self.predict(x, *args, **kwargs) # for inference
 
     def predict(self, x, profile=False, visualize=False, augment=False, embed=None):
         """
@@ -177,14 +177,15 @@ class BaseModel(torch.nn.Module):
                 x = y[m.f] if isinstance(m.f, int) else [x if j == -1 else y[j] for j in m.f]  # from earlier layers
             if profile:
                 self._profile_one_layer(m, x, dt)
-            x = m(x)  # run
-            y.append(x if m.i in self.save else None)  # save output
+            x = m(x)  # run 前向传播
+            y.append(x if m.i in self.save else None)  # save output # self.save为需要保存中间层数据的中间层索引
             if visualize:
                 feature_visualization(x, m.type, m.i, save_dir=visualize)
             if m.i in embed:
                 embeddings.append(torch.nn.functional.adaptive_avg_pool2d(x, (1, 1)).squeeze(-1).squeeze(-1))  # flatten
                 if m.i == max_idx:
-                    return torch.unbind(torch.cat(embeddings, 1), dim=0)
+                    # torch.unbind按照某个维度将tensor拆分
+                    return torch.unbind(torch.cat(embeddings, 1), dim=0) # embeddings为tensor lists
         return x
 
     def _predict_augment(self, x):
@@ -309,18 +310,19 @@ class BaseModel(torch.nn.Module):
         """
         model = weights["model"] if isinstance(weights, dict) else weights  # torchvision models are not dicts
         csd = model.float().state_dict()  # checkpoint state_dict as FP32
-        updated_csd = intersect_dicts(csd, self.state_dict())  # intersect
+        # 仅加载公共的参数
+        updated_csd = intersect_dicts(csd, self.state_dict())  # intersect self.state_dict()即当前的BaseModel或子类的参数
         self.load_state_dict(updated_csd, strict=False)  # load
         len_updated_csd = len(updated_csd)
         first_conv = "model.0.conv.weight"  # hard-coded to yolo models for now
         # mostly used to boost multi-channel training
         state_dict = self.state_dict()
-        if first_conv not in updated_csd and first_conv in state_dict:
+        if first_conv not in updated_csd and first_conv in state_dict: # 兼容第一层通道不相等的情况
             c1, c2, h, w = state_dict[first_conv].shape
             cc1, cc2, ch, cw = csd[first_conv].shape
             if ch == h and cw == w:
                 c1, c2 = min(c1, cc1), min(c2, cc2)
-                state_dict[first_conv][:c1, :c2] = csd[first_conv][:c1, :c2]
+                state_dict[first_conv][:c1, :c2] = csd[first_conv][:c1, :c2] # 强行加载参数
                 len_updated_csd += 1
         if verbose:
             LOGGER.info(f"Transferred {len_updated_csd}/{len(self.model.state_dict())} items from pretrained weights")
@@ -393,10 +395,11 @@ class DetectionModel(BaseModel):
             self.yaml["backbone"][0][2] = "nn.Identity"
 
         # Define model
-        self.yaml["channels"] = ch  # save channels
-        if nc and nc != self.yaml["nc"]:
+        self.yaml["channels"] = ch  # save channels 图像默认三通道
+        if nc and nc != self.yaml["nc"]: # 类别个数
             LOGGER.info(f"Overriding model.yaml nc={self.yaml['nc']} with nc={nc}")
             self.yaml["nc"] = nc  # override YAML value
+        # 下面开始解析模型，和yolov5框架类似，调用parse_model
         self.model, self.save = parse_model(deepcopy(self.yaml), ch=ch, verbose=verbose)  # model, savelist
         self.names = {i: f"{i}" for i in range(self.yaml["nc"])}  # default names dict
         self.inplace = self.yaml.get("inplace", True)
@@ -404,6 +407,7 @@ class DetectionModel(BaseModel):
 
         # Build strides
         m = self.model[-1]  # Detect()
+        # Detect是大部分检测头或者分割头的父类
         if isinstance(m, Detect):  # includes all Detect subclasses like Segment, Pose, OBB, YOLOEDetect, YOLOESegment
             s = 256  # 2x min stride
             m.inplace = self.inplace
@@ -419,7 +423,8 @@ class DetectionModel(BaseModel):
             m.stride = torch.tensor([s / x.shape[-2] for x in _forward(torch.zeros(1, ch, s, s))])  # forward
             self.stride = m.stride
             self.model.train()  # Set model back to training(default) mode
-            m.bias_init()  # only run once
+            # 为了使得box regression和classification有更好的响应
+            m.bias_init()  # only run once # 初始化Detect Head的bias
         else:
             self.stride = torch.Tensor([32])  # default stride for i.e. RTDETR
 
@@ -1446,7 +1451,7 @@ def torch_safe_load(weight, safe_only=False):
                 with open(file, "rb") as f:
                     ckpt = torch_load(f, pickle_module=safe_pickle)
             else:
-                ckpt = torch_load(file, map_location="cpu")
+                ckpt = torch_load(file, map_location="cpu") # 将模型加载到cpu上
 
     except ModuleNotFoundError as e:  # e.name is missing module name
         if e.name == "models":
@@ -1548,9 +1553,10 @@ def attempt_load_one_weight(weight, device=None, inplace=True, fuse=False):
         model (torch.nn.Module): Loaded model.
         ckpt (dict): Model checkpoint dictionary.
     """
-    ckpt, weight = torch_safe_load(weight)  # load ckpt
+    ckpt, weight = torch_safe_load(weight)  # load ckpt,weight为权重路径
     args = {**DEFAULT_CFG_DICT, **(ckpt.get("train_args", {}))}  # combine model and default args, preferring model args
-    model = (ckpt.get("ema") or ckpt["model"]).to(device).float()  # FP32 model
+    # 这里的ckpt中应该是保存了完整的模型
+    model = (ckpt.get("ema") or ckpt["model"]).to(device).float()  # FP32 model，"ema"和"normal"
 
     # Model compatibility updates
     model.args = {k: v for k, v in args.items() if k in DEFAULT_CFG_KEYS}  # attach args to model
@@ -1559,6 +1565,7 @@ def attempt_load_one_weight(weight, device=None, inplace=True, fuse=False):
     if not hasattr(model, "stride"):
         model.stride = torch.tensor([32.0])
 
+    # fuse() used to merge conv and batchnorm
     model = model.fuse().eval() if fuse and hasattr(model, "fuse") else model.eval()  # model in eval mode
 
     # Module updates
@@ -1590,14 +1597,14 @@ def parse_model(d, ch, verbose=True):
     # Args
     legacy = True  # backward compatibility for v3/v5/v8/v9 models
     max_channels = float("inf")
-    nc, act, scales = (d.get(x) for x in ("nc", "activation", "scales"))
+    nc, act, scales = (d.get(x) for x in ("nc", "activation", "scales")) # nc和scales一般都有
     depth, width, kpt_shape = (d.get(x, 1.0) for x in ("depth_multiple", "width_multiple", "kpt_shape"))
     if scales:
-        scale = d.get("scale")
+        scale = d.get("scale") # 在yaml_model_load已经解析，即nsmlx
         if not scale:
             scale = tuple(scales.keys())[0]
             LOGGER.warning(f"no model scale passed. Assuming scale='{scale}'.")
-        depth, width, max_channels = scales[scale]
+        depth, width, max_channels = scales[scale] # 得到对应尺度模型的深度、宽度、最大通道数
 
     if act:
         Conv.default_act = eval(act)  # redefine default activation, i.e. Conv.default_act = torch.nn.SiLU()
@@ -1606,8 +1613,8 @@ def parse_model(d, ch, verbose=True):
 
     if verbose:
         LOGGER.info(f"\n{'':>3}{'from':>20}{'n':>3}{'params':>10}  {'module':<45}{'arguments':<30}")
-    ch = [ch]
-    layers, save, c2 = [], [], ch[-1]  # layers, savelist, ch out
+    ch = [ch] # 初始ch=3,由于image为三通道，ch变为list，存储历史输出的channels
+    layers, save, c2 = [], [], ch[-1]  # layers, savelist, ch out c2初始为3
     base_modules = frozenset(
         {
             Classify,
@@ -1656,8 +1663,6 @@ def parse_model(d, ch, verbose=True):
             C2fAttn,
             C3,
             C3TR,
-            C3Ghost,
-            C3x,
             RepC3,
             C2fPSA,
             C2fCIB,
@@ -1665,30 +1670,35 @@ def parse_model(d, ch, verbose=True):
             A2C2f,
         }
     )
-    for i, (f, n, m, args) in enumerate(d["backbone"] + d["head"]):  # from, number, module, args
+    # 下面一次遍历yaml中的配置，加载pytorch各个block、layer，放入nn.Sequential组成对应的model
+    # eg:   - [-1, 1, Conv, [64, 3, 2]] # 0-P1/2
+    for i, (f, n, m, args) in enumerate(d["backbone"] + d["head"]):  # from, repeats number, module, args
+        # 下面为三元操作符
         m = (
             getattr(torch.nn, m[3:])
-            if "nn." in m
+            if "nn." in m # 比如nn.Upsample
             else getattr(__import__("torchvision").ops, m[16:])
             if "torchvision.ops." in m
-            else globals()[m]
+            else globals()[m] # 从全局作用域中查找，当前文件头部已经导入各种模块
         )  # get module
+
         for j, a in enumerate(args):
             if isinstance(a, str):
                 with contextlib.suppress(ValueError):
                     args[j] = locals()[a] if a in locals() else ast.literal_eval(a)
-        n = n_ = max(round(n * depth), 1) if n > 1 else n  # depth gain
+        # depth gain 根据model的depth scale确定每个模块的数量            
+        n = n_ = max(round(n * depth), 1) if n > 1 else n  
         if m in base_modules:
-            c1, c2 = ch[f], args[0]
+            c1, c2 = ch[f], args[0] # c1为block输入的通道数，同时记录模型的层数，便于后续的concat等操作
             if c2 != nc:  # if c2 not equal to number of classes (i.e. for Classify() output)
-                c2 = make_divisible(min(c2, max_channels) * width, 8)
+                c2 = make_divisible(min(c2, max_channels) * width, 8) # 通道被8整除
             if m is C2fAttn:  # set 1) embed channels and 2) num heads
                 args[1] = make_divisible(min(args[1], max_channels // 2) * width, 8)
                 args[2] = int(max(round(min(args[2], max_channels // 2 // 32)) * width, 1) if args[2] > 1 else args[2])
 
-            args = [c1, c2, *args[1:]]
+            args = [c1, c2, *args[1:]] # input channels、output channels、kernel_size、stride ?
             if m in repeat_modules:
-                args.insert(2, n)  # number of repeats
+                args.insert(2, n)  # number of repeats 在索引2处插入n，表示该block重复n次
                 n = 1
             if m is C3k2:  # for M/L/X sizes
                 legacy = False
@@ -1697,7 +1707,7 @@ def parse_model(d, ch, verbose=True):
             if m is A2C2f:
                 legacy = False
                 if scale in "lx":  # for L/X sizes
-                    args.extend((True, 1.2))
+                    args.extend((True, 1.2)) # extend将可迭代的对象中的元素依次添加到args中
             if m is C2fCIB:
                 legacy = False
         elif m is AIFI:
@@ -1713,11 +1723,11 @@ def parse_model(d, ch, verbose=True):
         elif m is torch.nn.BatchNorm2d:
             args = [ch[f]]
         elif m is Concat:
-            c2 = sum(ch[x] for x in f)
+            c2 = sum(ch[x] for x in f) # Concat输出的通道数等于各个输入的通道数之和
         elif m in frozenset(
             {Detect, WorldDetect, YOLOEDetect, Segment, YOLOESegment, Pose, OBB, ImagePoolingAttn, v10Detect}
         ):
-            args.append([ch[x] for x in f])
+            args.append([ch[x] for x in f]) # head经常为多个输入
             if m is Segment or m is YOLOESegment:
                 args[2] = make_divisible(min(args[2], max_channels) * width, 8)
             if m in {Detect, YOLOEDetect, Segment, YOLOESegment, Pose, OBB}:
@@ -1736,10 +1746,10 @@ def parse_model(d, ch, verbose=True):
             args = [*args[1:]]
         else:
             c2 = ch[f]
-
+        # n为模块重复的次数
         m_ = torch.nn.Sequential(*(m(*args) for _ in range(n))) if n > 1 else m(*args)  # module
         t = str(m)[8:-2].replace("__main__.", "")  # module type
-        m_.np = sum(x.numel() for x in m_.parameters())  # number params
+        m_.np = sum(x.numel() for x in m_.parameters())  # number params 计算每个模块的参数张量数量之和，即可获得模型的总参数量
         m_.i, m_.f, m_.type = i, f, t  # attach index, 'from' index, type
         if verbose:
             LOGGER.info(f"{i:>3}{str(f):>20}{n_:>3}{m_.np:10.0f}  {t:<45}{str(args):<30}")  # print
@@ -1747,7 +1757,7 @@ def parse_model(d, ch, verbose=True):
         layers.append(m_)
         if i == 0:
             ch = []
-        ch.append(c2)
+        ch.append(c2) # 保存当前模块输出的通道数
     return torch.nn.Sequential(*layers), sorted(save)
 
 
@@ -1769,8 +1779,8 @@ def yaml_model_load(path):
 
     unified_path = re.sub(r"(\d+)([nslmx])(.+)?$", r"\1\3", str(path))  # i.e. yolov8x.yaml -> yolov8.yaml
     yaml_file = check_yaml(unified_path, hard=False) or check_yaml(path)
-    d = YAML.load(yaml_file)  # model dict
-    d["scale"] = guess_model_scale(path)
+    d = YAML.load(yaml_file)  # model dict 加载模型
+    d["scale"] = guess_model_scale(path) # 模型尺度
     d["yaml_file"] = str(path)
     return d
 

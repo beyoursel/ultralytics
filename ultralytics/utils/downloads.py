@@ -449,7 +449,7 @@ def attempt_download_asset(file, repo: str = "ultralytics/assets", release: str 
     file = checks.check_yolov5u_filename(file)
     file = Path(file.strip().replace("'", ""))
     if file.exists():
-        return str(file)
+        return str(file) # 模型权重路径存在，直接返回
     elif (SETTINGS["weights_dir"] / file).exists():
         return str(SETTINGS["weights_dir"] / file)
     else:

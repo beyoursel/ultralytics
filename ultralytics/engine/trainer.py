@@ -117,17 +117,18 @@ class BaseTrainer:
             _callbacks (list, optional): List of callback functions.
         """
         self.args = get_cfg(cfg, overrides)
-        self.check_resume(overrides)
-        self.device = select_device(self.args.device, self.args.batch)
+        self.check_resume(overrides) # 检查是否为恢复训练
+        self.device = select_device(self.args.device, self.args.batch) # return torch.device()
         # Update "-1" devices so post-training val does not repeat search
+        # CUDA_VISIBLE_DEVICES未设置
         self.args.device = os.getenv("CUDA_VISIBLE_DEVICES") if "cuda" in str(self.device) else str(self.device)
         self.validator = None
         self.metrics = None
         self.plots = {}
-        init_seeds(self.args.seed + 1 + RANK, deterministic=self.args.deterministic)
+        init_seeds(self.args.seed + 1 + RANK, deterministic=self.args.deterministic) # 设置随机种子，保证训练结果可重复
 
         # Dirs
-        self.save_dir = get_save_dir(self.args)
+        self.save_dir = get_save_dir(self.args) # 得到训练结果存放的文件夹
         self.args.name = self.save_dir.name  # update name for loggers
         self.wdir = self.save_dir / "weights"  # weights dir
         if RANK in {-1, 0}:
@@ -141,7 +142,7 @@ class BaseTrainer:
         self.epochs = self.args.epochs or 100  # in case users accidentally pass epochs=None with timed training
         self.start_epoch = 0
         if RANK == -1:
-            print_args(vars(self.args))
+            print_args(vars(self.args)) # 打印所有参数
 
         # Device
         if self.device.type in {"cpu", "mps"}:
@@ -150,7 +151,7 @@ class BaseTrainer:
         # Model and Dataset
         self.model = check_model_file_from_stem(self.args.model)  # add suffix, i.e. yolo11n -> yolo11n.pt
         with torch_distributed_zero_first(LOCAL_RANK):  # avoid auto-downloading dataset multiple times
-            self.data = self.get_dataset()
+            self.data = self.get_dataset() # 获取数据集信息
 
         self.ema = None
 
@@ -173,7 +174,7 @@ class BaseTrainer:
         # Callbacks
         self.callbacks = _callbacks or callbacks.get_default_callbacks()
         if RANK in {-1, 0}:
-            callbacks.add_integration_callbacks(self)
+            callbacks.add_integration_callbacks(self) # 向self.callbacks增加回调
 
     def add_callback(self, event: str, callback):
         """Append the given callback to the event's callback list."""
@@ -224,14 +225,14 @@ class BaseTrainer:
                 ddp_cleanup(self, str(file))
 
         else:
-            self._do_train(world_size)
+            self._do_train(world_size) # 真正训练的入口
 
     def _setup_scheduler(self):
         """Initialize training learning rate scheduler."""
         if self.args.cos_lr:
             self.lf = one_cycle(1, self.args.lrf, self.epochs)  # cosine 1->hyp['lrf']
         else:
-            self.lf = lambda x: max(1 - x / self.epochs, 0) * (1.0 - self.args.lrf) + self.args.lrf  # linear
+            self.lf = lambda x: max(1 - x / self.epochs, 0) * (1.0 - self.args.lrf) + self.args.lrf  # linear 最终学习率与初始学习率的比值
         self.scheduler = optim.lr_scheduler.LambdaLR(self.optimizer, lr_lambda=self.lf)
 
     def _setup_ddp(self, world_size):
@@ -270,7 +271,7 @@ class BaseTrainer:
             # v.register_hook(lambda x: torch.nan_to_num(x))  # NaN to 0 (commented for erratic training results)
             if any(x in k for x in freeze_layer_names):
                 LOGGER.info(f"Freezing layer '{k}'")
-                v.requires_grad = False
+                v.requires_grad = False # 将梯度置为False
             elif not v.requires_grad and v.dtype.is_floating_point:  # only floating point Tensor can require gradients
                 LOGGER.warning(
                     f"setting 'requires_grad=True' for frozen layer '{k}'. "
@@ -291,7 +292,7 @@ class BaseTrainer:
             torch.amp.GradScaler("cuda", enabled=self.amp) if TORCH_2_4 else torch.cuda.amp.GradScaler(enabled=self.amp)
         )
         if world_size > 1:
-            self.model = nn.parallel.DistributedDataParallel(self.model, device_ids=[RANK], find_unused_parameters=True)
+            self.model = nn.parallel.DistributedDataParallel(self.model, device_ids=[RANK], find_unused_parameters=True) # 分布式训练
 
         # Check imgsz
         gs = max(int(self.model.stride.max() if hasattr(self.model, "stride") else 32), 32)  # grid size (max stride)
@@ -315,7 +316,7 @@ class BaseTrainer:
                 rank=-1,
                 mode="val",
             )
-            self.validator = self.get_validator()
+            self.validator = self.get_validator() # 
             metric_keys = self.validator.metrics.keys + self.label_loss_items(prefix="val")
             self.metrics = dict(zip(metric_keys, [0] * len(metric_keys)))
             self.ema = ModelEMA(self.model)
@@ -328,16 +329,16 @@ class BaseTrainer:
         iterations = math.ceil(len(self.train_loader.dataset) / max(self.batch_size, self.args.nbs)) * self.epochs
         self.optimizer = self.build_optimizer(
             model=self.model,
-            name=self.args.optimizer,
+            name=self.args.optimizer, # 默认auto
             lr=self.args.lr0,
             momentum=self.args.momentum,
             decay=weight_decay,
             iterations=iterations,
-        )
+        ) # iterations > 10000 ? SGD: AdamW
         # Scheduler
-        self._setup_scheduler()
-        self.stopper, self.stop = EarlyStopping(patience=self.args.patience), False
-        self.resume_training(ckpt)
+        self._setup_scheduler() # 学习率优化器，默认自定义的linear
+        self.stopper, self.stop = EarlyStopping(patience=self.args.patience), False # 若100个epochs内fitness没有变化，则提前stop training
+        self.resume_training(ckpt) # 恢复训练，加载之前的模型参数
         self.scheduler.last_epoch = self.start_epoch - 1  # do not move
         self.run_callbacks("on_pretrain_routine_end")
 
@@ -345,7 +346,7 @@ class BaseTrainer:
         """Train the model with the specified world size."""
         if world_size > 1:
             self._setup_ddp(world_size)
-        self._setup_train(world_size)
+        self._setup_train(world_size) # 设置训练相关（数据集读取、建立dataloader、选择optimizer、选择scheduler）
 
         nb = len(self.train_loader)  # number of batches
         nw = max(round(self.args.warmup_epochs * nb), 100) if self.args.warmup_epochs > 0 else -1  # warmup iterations
@@ -360,7 +361,7 @@ class BaseTrainer:
             f"Logging results to {colorstr('bold', self.save_dir)}\n"
             f"Starting training for " + (f"{self.args.time} hours..." if self.args.time else f"{self.epochs} epochs...")
         )
-        if self.args.close_mosaic:
+        if self.args.close_mosaic:# 提前关闭mosaic
             base_idx = (self.epochs - self.args.close_mosaic) * nb
             self.plot_idx.extend([base_idx, base_idx + 1, base_idx + 2])
         epoch = self.start_epoch
@@ -371,15 +372,12 @@ class BaseTrainer:
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore")  # suppress 'Detected lr_scheduler.step() before optimizer.step()'
                 self.scheduler.step()
-
-            self._model_train()
-            if RANK != -1:
-                self.train_loader.sampler.set_epoch(epoch)
+            self._model_train() # set model.train()，and freeze certain layer(eg: dfl layer and BN)
             pbar = enumerate(self.train_loader)
             # Update dataloader attributes (optional)
             if epoch == (self.epochs - self.args.close_mosaic):
                 self._close_dataloader_mosaic()
-                self.train_loader.reset()
+                self.train_loader.reset() # 允许训练时数据集可以被修改
 
             if RANK in {-1, 0}:
                 LOGGER.info(self.progress_string())
@@ -395,16 +393,16 @@ class BaseTrainer:
                     for j, x in enumerate(self.optimizer.param_groups):
                         # Bias lr falls from 0.1 to lr0, all other lrs rise from 0.0 to lr0
                         x["lr"] = np.interp(
-                            ni, xi, [self.args.warmup_bias_lr if j == 0 else 0.0, x["initial_lr"] * self.lf(epoch)]
-                        )
+                            ni, xi, [self.args.warmup_bias_lr if j == 0 else 0.0, x["initial_lr"] * self.lf(epoch)] # self.lf为linear lr-scheduler
+                        ) # 根据epoch可以计算当前学习率占初始学习率的比例，进而计算当前epoch的学习率，根据插值计算当前batch的学习率
                         if "momentum" in x:
                             x["momentum"] = np.interp(ni, xi, [self.args.warmup_momentum, self.args.momentum])
 
                 # Forward
-                with autocast(self.amp):
+                with autocast(self.amp): # 混合精度训练
                     batch = self.preprocess_batch(batch)
                     loss, self.loss_items = self.model(batch)
-                    self.loss = loss.sum()
+                    self.loss = loss.sum() # sum to scalar
                     if RANK != -1:
                         self.loss *= world_size
                     self.tloss = (
@@ -604,7 +602,8 @@ class BaseTrainer:
                 "pose",
                 "obb",
             }:
-                data = check_det_dataset(self.args.data)
+                data = check_det_dataset(self.args.data) # 获得数据集相关信息，比如数据集路径、类别数
+                
                 if "yaml_file" in data:
                     self.args.data = data["yaml_file"]  # for validating 'yolo train data=url.zip' usage
         except Exception as e:
@@ -858,7 +857,7 @@ class BaseTrainer:
         elif name == "RMSProp":
             optimizer = optim.RMSprop(g[2], lr=lr, momentum=momentum)
         elif name == "SGD":
-            optimizer = optim.SGD(g[2], lr=lr, momentum=momentum, nesterov=True)
+            optimizer = optim.SGD(g[2], lr=lr, momentum=momentum, nesterov=True) # add bias
         else:
             raise NotImplementedError(
                 f"Optimizer '{name}' not found in list of available optimizers {optimizers}. "

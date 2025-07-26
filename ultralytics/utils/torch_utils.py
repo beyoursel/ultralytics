@@ -484,11 +484,13 @@ def initialize_weights(model):
     for m in model.modules():
         t = type(m)
         if t is nn.Conv2d:
+            # kaiming_normal_是一种针对ReLU激活函数的初始化方法，有助于避免深度网络训练时梯度消失或梯度爆炸问题
             pass  # nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
         elif t is nn.BatchNorm2d:
-            m.eps = 1e-3
-            m.momentum = 0.03
+            m.eps = 1e-3 # 放在分母，防止分母为0
+            m.momentum = 0.03 # 
         elif t in {nn.Hardswish, nn.LeakyReLU, nn.ReLU, nn.ReLU6, nn.SiLU}:
+            # 原地修改输入张量，降低内存消耗
             m.inplace = True
 
 
@@ -617,7 +619,7 @@ def init_seeds(seed=0, deterministic=False):
     torch.cuda.manual_seed(seed)
     torch.cuda.manual_seed_all(seed)  # for Multi-GPU, exception safe
     # torch.backends.cudnn.benchmark = True  # AutoBatch problem https://github.com/ultralytics/yolov5/issues/9287
-    if deterministic:
+    if deterministic: # torch.2.0以上可以使用确定性训练
         if TORCH_2_0:
             torch.use_deterministic_algorithms(True, warn_only=True)  # warn if deterministic is not possible
             torch.backends.cudnn.deterministic = True

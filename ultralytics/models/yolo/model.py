@@ -76,13 +76,12 @@ class YOLO(Model):
             self.__dict__ = new_instance.__dict__
         else:
             # Continue with default YOLO initialization
-            super().__init__(model=model, task=task, verbose=verbose)
+            super().__init__(model=model, task=task, verbose=verbose) # 由基类创建模型或加载模型
             if hasattr(self.model, "model") and "RTDETR" in self.model.model[-1]._get_name():  # if RTDETR head
-                from ultralytics import RTDETR
-
+                from ultralytics import RTDETR # YOLO主干，但是使用RTDETR的检测头(模型路径或者文件名中没有rtdetr)
                 new_instance = RTDETR(self)
-                self.__class__ = type(new_instance)
-                self.__dict__ = new_instance.__dict__
+                self.__class__ = type(new_instance) # 当前对象就切换为RTDETR，后续调用的方法和属性均为RTDETR
+                self.__dict__ = new_instance.__dict__ # 用RTDETR的属性替换当前实例的属性
 
     @property
     def task_map(self) -> Dict[str, Dict[str, Any]]:
