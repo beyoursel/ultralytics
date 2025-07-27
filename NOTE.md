@@ -58,6 +58,7 @@ ultralytics = "ultralytics.cfg:entrypoint"
 默认使用DEFAULT_CFG_PATH = ROOT / "cfg/default.yaml"下的配置文件。
 
 ## 1.4 callback()是怎么触发的
+当前项目的callback()貌似都是空的，没有写实际的回调功能
 
 ## 1.5 训练相关笔记
 ### 1.5.1 RANK是什么
@@ -80,3 +81,15 @@ def _model_train(self):
 yolo detect train model=/media/taole/mydisk/DL_PROJECT/ultralytics/runs/detect/train8/weights/last.pt resume=True
 # 注意需要指定model=xxx.last.pt，和resume，在default.yaml中设置resume不生效
 ```
+
+## 1.8 学习率调度器(scheduler)
+‵``
+def _setup_scheduler(self):
+    """Initialize training learning rate scheduler."""
+    if self.args.cos_lr:
+        self.lf = one_cycle(1, self.args.lrf, self.epochs)  # cosine 1->hyp['lrf']
+    else:
+        self.lf = lambda x: max(1 - x / self.epochs, 0) * (1.0 - self.args.lrf) + self.args.lrf  # linear 最终学习率与初始学习率的比值
+    self.scheduler = optim.lr_scheduler.LambdaLR(self.optimizer, lr_lambda=self.lf)
+```
+根据输入的epoch计算，当前epoch的学习率与初始学习率的比率，然后可以计算当前epoch需要设置的学习率，一般初始设置0.01，结束时学习率是开始的0.01倍。

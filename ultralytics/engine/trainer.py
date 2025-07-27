@@ -410,11 +410,11 @@ class BaseTrainer:
                     )
 
                 # Backward
-                self.scaler.scale(self.loss).backward()
+                self.scaler.scale(self.loss).backward() 
 
                 # Optimize - https://pytorch.org/docs/master/notes/amp_examples.html
                 if ni - last_opt_step >= self.accumulate:
-                    self.optimizer_step()
+                    self.optimizer_step() # 更新scaler|optimizer、ema模型
                     last_opt_step = ni
 
                     # Timed stopping
@@ -640,10 +640,9 @@ class BaseTrainer:
         torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=10.0)  # clip gradients
         self.scaler.step(self.optimizer)
         self.scaler.update()
-        self.optimizer.zero_grad()
+        self.optimizer.zero_grad() # 清空上一次迭代的梯度
         if self.ema:
-            self.ema.update(self.model)
-
+            self.ema.update(self.model) # 更新ema模型
     def preprocess_batch(self, batch):
         """Allow custom preprocessing model inputs and ground truths depending on task type."""
         return batch
